@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>MISO Integrated MCC Tiles</title>
+    <title>MISO MCC & Wind Queue</title>
     <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
     <style>
@@ -13,26 +13,43 @@
             margin: 20px; padding: 15px; border-radius: 8px; 
             z-index: 1; font-family: 'Helvetica Neue', Arial, sans-serif;
             box-shadow: 0 0 15px rgba(0,0,0,0.1);
+            width: 220px;
         }
         .legend { margin-top: 10px; font-size: 12px; }
         .gradient {
             height: 10px; width: 100%;
-            background: linear-gradient(to right, #5e2a84, #f1f1f1, #ffcc00);
+            background: linear-gradient(to right, #08519c, #f7f7f7, #d94701);
             margin-bottom: 5px;
+        }
+        .circle-legend {
+            display: inline-block;
+            width: 12px; height: 12px;
+            background: #00ffcc;
+            border-radius: 50%;
+            margin-right: 5px;
+            border: 1px solid #333;
         }
     </style>
 </head>
 <body>
     <div class="info-panel">
-        <b>MISO Congestion (MCC)</b><br>
-        <span style="font-size: 0.9em; color: #666;">Integrated Gen + Load Nodes</span>
+        <b>MISO Grid Analysis</b><br>
+        <span style="font-size: 0.85em; color: #444;">Congestion vs. New Wind Queue</span>
+        
         <div class="legend">
+            <div style="margin-bottom: 5px;">Avg MCC ($/MWh)</div>
             <div class="gradient"></div>
             <div style="display: flex; justify-content: space-between;">
-                <span>-$20 (Cheap)</span>
+                <span>-$15</span>
                 <span>$0</span>
-                <span>+$20 (High)</span>
+                <span>+$15</span>
             </div>
+        </div>
+
+        <div class="legend" style="margin-top: 15px;">
+            <div class="circle-legend"></div>
+            <span><b>Wind Project Queue</b></span><br>
+            <span style="font-size: 0.8em; color: #666;">Size = Project Count per County</span>
         </div>
     </div>
     <div id="map"></div>
@@ -42,19 +59,25 @@
 
         const map = new mapboxgl.Map({
             container: 'map',
-            style: 'mapbox://styles/mapbox/dark-v11',
+            style: 'mapbox://styles/mapbox/dark-v11', 
             center: [-92.5, 41.5], 
             zoom: 5
         });
 
         map.on('load', () => {
-            // 1. Add the Tile Source
+            // --- SOURCE: MCC TILES ---
             map.addSource('mcc-tiles', {
                 type: 'geojson',
                 data: 'data/miso_mcc_tiles_integrated.geojson' 
             });
 
-            // 2. Add the Fill Layer with a Color Interpolation
+            // --- SOURCE: WIND QUEUE ---
+            map.addSource('wind-queue', {
+                type: 'geojson',
+                data: 'data/wind_queue_centroids.geojson'
+            });
+
+            // --- LAYER: MCC HEATMAP ---
             map.addLayer({
                 'id': 'mcc-heat',
                 'type': 'fill',
@@ -64,34 +87,64 @@
                         'interpolate',
                         ['linear'],
                         ['get', 'mcc_avg'],
-                        -15, '#08519c', // Dark Blue (Congested/Oversupply)
-                        -5,  '#bdd7e7', // Light Blue
-                        0,   '#f7f7f7', // Neutral (Reference Hub level)
-                        5,   '#fdbe85', // Light Orange
-                        15,  '#d94701'  // Deep Orange (Congested/High Demand)
+                        -15, '#08519c', 
+                        0,   '#f7f7f7', 
+                        15,  '#d94701'  
                     ],
-                    'fill-opacity': 0.75,
-                    'fill-outline-color': 'rgba(255,255,255,0.1)'
+                    'fill-opacity': 0.65
                 }
             });
-            // 3. Add a hover popup for precise value checking
+
+            // --- LAYER: WIND BUBBLES ---
+            map.addLayer({
+                'id': 'wind-bubbles',
+                'type': 'circle',
+                'source': 'wind-queue',
+                'paint': {
+                    // Radius scales by project count
+                    'circle-radius': [
+                        'interpolate', ['linear'], ['get', 'project_count'],
+                        1, 4,
+                        5, 10,
+                        20, 25
+                    ],
+                    'circle-color': '#00ffcc',
+                    'circle-opacity': 0.8,
+                    'circle-stroke-width': 1,
+                    'circle-stroke-color': '#000'
+                }
+            });
+
+            // --- INTERACTION: POPUPS ---
             const popup = new mapboxgl.Popup({
                 closeButton: false,
                 closeOnClick: false
             });
 
-            map.on('mousemove', 'mcc-heat', (e) => {
-                map.getCanvas().style.cursor = 'pointer';
-                const mcc = e.features[0].properties.mcc_avg.toFixed(2);
-                
-                popup.setLngLat(e.lngLat)
-                    .setHTML(`<strong>MCC: $${mcc}</strong>`)
-                    .addTo(map);
-            });
+            // Handle hover for both layers
+            map.on('mousemove', (e) => {
+                const features = map.queryRenderedFeatures(e.point, {
+                    layers: ['wind-bubbles', 'mcc-heat']
+                });
 
-            map.on('mouseleave', 'mcc-heat', () => {
-                map.getCanvas().style.cursor = '';
-                popup.remove();
+                if (!features.length) {
+                    popup.remove();
+                    map.getCanvas().style.cursor = '';
+                    return;
+                }
+
+                map.getCanvas().style.cursor = 'pointer';
+                const f = features[0];
+
+                let html = "";
+                if (f.layer.id === 'wind-bubbles') {
+                    html = `<strong>${f.properties.COUNTY_NAME}, ${f.properties.STATE_ABBR}</strong><br>
+                            Wind Projects: ${f.properties.project_count}`;
+                } else {
+                    html = `<strong>MCC: $${f.properties.mcc_avg.toFixed(2)}</strong>`;
+                }
+
+                popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
             });
         });
     </script>
