@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>MISO MCC & Wind Queue</title>
+    <title>MISO Grid Analysis</title>
     <script src="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v3.1.2/mapbox-gl.css" rel="stylesheet">
     <style>
@@ -13,7 +13,7 @@
             margin: 20px; padding: 15px; border-radius: 8px; 
             z-index: 1; font-family: 'Helvetica Neue', Arial, sans-serif;
             box-shadow: 0 0 15px rgba(0,0,0,0.1);
-            width: 220px;
+            width: 240px;
         }
         .legend { margin-top: 10px; font-size: 12px; }
         .gradient {
@@ -23,7 +23,7 @@
         }
         .circle-legend {
             display: inline-block;
-            width: 12px; height: 12px;
+            width: 10px; height: 10px;
             background: #00ffcc;
             border-radius: 50%;
             margin-right: 5px;
@@ -34,7 +34,7 @@
 <body>
     <div class="info-panel">
         <b>MISO Grid Analysis</b><br>
-        <span style="font-size: 0.85em; color: #444;">Congestion vs. New Wind Queue</span>
+        <span style="font-size: 0.85em; color: #444;">Congestion & Existing Wind</span>
         
         <div class="legend">
             <div style="margin-bottom: 5px;">Avg MCC ($/MWh)</div>
@@ -47,16 +47,16 @@
         </div>
 
         <div class="legend" style="margin-top: 15px;">
-            <div class="circle-legend" style="background: #00ffcc;"></div>
-                <span><b>Existing Wind Farms</b></span><br>
-                <span style="font-size: 0.8em; color: #666;">Individual generator locations</span>
-            </div>
-            
-            <div class="legend" style="margin-top: 10px;">
-                <div style="display: inline-block; width: 20px; height: 2px; background: rgba(255,255,255,0.8); margin-bottom: 4px; margin-right: 5px;"></div>
-                <span><b>Transmission Lines</b></span><br>
-                <span style="font-size: 0.8em; color: #666;">MISO Midwest High-Voltage Grid</span>
-            </div>
+            <div class="circle-legend"></div>
+            <span><b>Wind Farms</b></span><br>
+            <span style="font-size: 0.8em; color: #666;">Individual MISO Generators</span>
+        </div>
+        
+        <div class="legend" style="margin-top: 10px;">
+            <div style="display: inline-block; width: 20px; height: 2px; background: #fff; border: 1px solid #666; margin-bottom: 3px; margin-right: 5px;"></div>
+            <span><b>Transmission Lines</b></span><br>
+            <span style="font-size: 0.8em; color: #666;">345kV+ Midcontinent Grid</span>
+        </div>
     </div>
     <div id="map"></div>
 
@@ -71,68 +71,44 @@
         });
 
         map.on('load', () => {
-            // --- SOURCE: MCC TILES ---
-            map.addSource('mcc-tiles', {
-                type: 'geojson',
-                data: 'data/miso_mcc_tiles_integrated.geojson' 
-            });
+            // 1. SOURCES
+            map.addSource('mcc-tiles', { type: 'geojson', data: 'data/miso_mcc_tiles_integrated.geojson' });
+            map.addSource('existing-gens', { type: 'geojson', data: 'data/generators.json' });
+            map.addSource('transmission', { type: 'geojson', data: 'data/miso_midwest_transmission.json' });
 
-            // --- SOURCE: WIND QUEUE ---
-            map.addSource('wind-queue', {
-                type: 'geojson',
-                data: 'data/wind_queue_centroids.geojson'
-            });
-
-            // --- SOURCE: EXISTING GENERATORS ---
-            map.addSource('existing-gens', {
-                type: 'geojson',
-                data: 'data/generators.json' 
-            });
-            
-            // --- SOURCE: TRANSMISSION LINES ---
-            map.addSource('transmission', {
-                type: 'geojson',
-                data: 'data/miso_midwest_transmission.json'
-            });
-
-            // --- LAYER: MCC HEATMAP ---
+            // 2. LAYERS
+            // Heatmap Base
             map.addLayer({
                 'id': 'mcc-heat',
                 'type': 'fill',
                 'source': 'mcc-tiles',
                 'paint': {
-                    'fill-color': [
-                        'interpolate',
-                        ['linear'],
-                        ['get', 'mcc_avg'],
-                        -10, '#08519c', 
-                        0,   '#f7f7f7', 
-                        10,  '#d94701'  
-                    ],
-                    'fill-opacity': 0.65
+                    'fill-color': ['interpolate', ['linear'], ['get', 'mcc_avg'], -10, '#08519c', 0, '#f7f7f7', 10, '#d94701'],
+                    'fill-opacity': 0.6
                 }
             });
 
-            // --- LAYER: TRANSMISSION LINES (Add this AFTER mcc-heat) ---
+            // Transmission Lines (The Grid Skeleton)
             map.addLayer({
                 'id': 'transmission-lines',
                 'type': 'line',
                 'source': 'transmission',
                 'paint': {
                     'line-color': '#ffffff',
-                    'line-width': 0.8,
-                    'line-opacity': 0.4
+                    'line-width': ['match', ['get', 'voltage'], '765', 2.5, '345', 1, 0.8],
+                    'line-opacity': 0.5
                 }
             });
-            
-            // --- LAYER: EXISTING WIND FARMS (Replacing wind-bubbles) ---
+
+            // Wind Farms (Filtering for 'Wind' in the HTML description)
             map.addLayer({
                 'id': 'wind-farms',
                 'type': 'circle',
                 'source': 'existing-gens',
-                'filter': ['==', ['get', 'Fuel'], 'Wind'], // Filter for Wind only
+                // Since 'Fuel' isn't a top-level property, we look for 'Wind' in the description string
+                'filter': ['all', ['to-boolean', ['get', 'description']], ['in', 'Wind', ['get', 'description']]],
                 'paint': {
-                    'circle-radius': 3,
+                    'circle-radius': 4,
                     'circle-color': '#00ffcc',
                     'circle-stroke-width': 1,
                     'circle-stroke-color': '#000',
@@ -140,38 +116,22 @@
                 }
             });
 
-            // --- INTERACTION: POPUPS ---
-            const popup = new mapboxgl.Popup({
-                closeButton: false,
-                closeOnClick: false
-            });
+            // 3. POPUPS
+            const popup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false });
 
-            // Handle hover for both layers
             map.on('mousemove', (e) => {
-                const features = map.queryRenderedFeatures(e.point, {
-                    layers: ['wind-farms', 'mcc-heat'] // Updated layer ID
-                });
-            
-                if (!features.length) {
-                    popup.remove();
-                    map.getCanvas().style.cursor = '';
-                    return;
-                }
-            
+                const features = map.queryRenderedFeatures(e.point, { layers: ['wind-farms', 'mcc-heat'] });
+                if (!features.length) { popup.remove(); map.getCanvas().style.cursor = ''; return; }
+
                 map.getCanvas().style.cursor = 'pointer';
                 const f = features[0];
-            
-                let html = "";
-                if (f.layer.id === 'wind-farms') {
-                    // Use whatever property holds the plant name in your generators.json
-                    const name = f.properties.NAME || f.properties.Plant_Name || "Wind Farm";
-                    html = `<strong>${name}</strong><br>Fuel: Wind`;
-                } else {
-                    html = `<strong>MCC: $${f.properties.mcc_avg.toFixed(2)}</strong>`;
-                }
-            
+                let html = f.layer.id === 'wind-farms' 
+                    ? f.properties.description 
+                    : `<strong>MCC: $${f.properties.mcc_avg.toFixed(2)}</strong>`;
+
                 popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
             });
+        }); // End of map.on('load')
     </script>
 </body>
 </html>
