@@ -77,6 +77,18 @@
                 data: 'data/wind_queue_centroids.geojson'
             });
 
+            // --- SOURCE: EXISTING GENERATORS ---
+            map.addSource('existing-gens', {
+                type: 'geojson',
+                data: 'data/generators.json' 
+            });
+            
+            // --- SOURCE: TRANSMISSION LINES ---
+            map.addSource('transmission', {
+                type: 'geojson',
+                data: 'data/miso_midwest_transmission.json'
+            });
+
             // --- LAYER: MCC HEATMAP ---
             map.addLayer({
                 'id': 'mcc-heat',
@@ -95,23 +107,30 @@
                 }
             });
 
-            // --- LAYER: WIND BUBBLES ---
+            // --- LAYER: TRANSMISSION LINES (Add this AFTER mcc-heat) ---
             map.addLayer({
-                'id': 'wind-bubbles',
-                'type': 'circle',
-                'source': 'wind-queue',
+                'id': 'transmission-lines',
+                'type': 'line',
+                'source': 'transmission',
                 'paint': {
-                    // Radius scales by project count
-                    'circle-radius': [
-                        'interpolate', ['linear'], ['get', 'project_count'],
-                        1, 4,
-                        5, 10,
-                        20, 25
-                    ],
+                    'line-color': '#ffffff',
+                    'line-width': 0.8,
+                    'line-opacity': 0.4
+                }
+            });
+            
+            // --- LAYER: EXISTING WIND FARMS (Replacing wind-bubbles) ---
+            map.addLayer({
+                'id': 'wind-farms',
+                'type': 'circle',
+                'source': 'existing-gens',
+                'filter': ['==', ['get', 'Fuel'], 'Wind'], // Filter for Wind only
+                'paint': {
+                    'circle-radius': 3,
                     'circle-color': '#00ffcc',
-                    'circle-opacity': 0.8,
                     'circle-stroke-width': 1,
-                    'circle-stroke-color': '#000'
+                    'circle-stroke-color': '#000',
+                    'circle-opacity': 0.9
                 }
             });
 
@@ -124,29 +143,29 @@
             // Handle hover for both layers
             map.on('mousemove', (e) => {
                 const features = map.queryRenderedFeatures(e.point, {
-                    layers: ['wind-bubbles', 'mcc-heat']
+                    layers: ['wind-farms', 'mcc-heat'] // Updated layer ID
                 });
-
+            
                 if (!features.length) {
                     popup.remove();
                     map.getCanvas().style.cursor = '';
                     return;
                 }
-
+            
                 map.getCanvas().style.cursor = 'pointer';
                 const f = features[0];
-
+            
                 let html = "";
-                if (f.layer.id === 'wind-bubbles') {
-                    html = `<strong>${f.properties.COUNTY_NAME}, ${f.properties.STATE_ABBR}</strong><br>
-                            Wind Projects: ${f.properties.project_count}`;
+                if (f.layer.id === 'wind-farms') {
+                    // Use whatever property holds the plant name in your generators.json
+                    const name = f.properties.NAME || f.properties.Plant_Name || "Wind Farm";
+                    html = `<strong>${name}</strong><br>Fuel: Wind`;
                 } else {
                     html = `<strong>MCC: $${f.properties.mcc_avg.toFixed(2)}</strong>`;
                 }
-
+            
                 popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
             });
-        });
     </script>
 </body>
 </html>
